@@ -10,6 +10,7 @@
 class MatchEngine {
     
     public:
+    
 
         MatchEngine(std::vector<std::string> const & input) {
             this -> _input = input;
@@ -24,18 +25,20 @@ class MatchEngine {
                 if (!res.has_value())
                     continue;
                 
-                const auto& [command, order] = res.value();
+                auto& [command, order] = res.value();
                 
                 (this->*MatchEngine::commands[command])(order);
             }
+
+            this -> pairTrade();
 
             return this -> _finalOutput;
         };
     
         enum BOOK_ORDER {
-        BUY,
-        SELL,
-        NONE
+            BUY,
+            SELL,
+            NONE
         };
         
         enum COMMAND {
@@ -56,7 +59,7 @@ class MatchEngine {
     private:
 
         /*Define Pointer to method*/
-        typedef void (MatchEngine::*Command)(const Order&);
+        typedef void (MatchEngine::*Command)(Order&);
 
         /*Base Array Input*/
         std::vector<std::string> _input;
@@ -65,7 +68,7 @@ class MatchEngine {
         /*Vector that will hold the end result*/
         std::vector<std::string> _finalOutput;
         /*Map that will hold by symbol all leftover trades*/
-        std::map<std::string, std::vector<std::string>> _leftTrades;
+        std::map<std::string, std::vector<MatchEngine::Order>> _leftTrades;
         /*Array that will contain pointer to method: insert, amend and pull*/
         Command commands[3] = {
             &MatchEngine::insert,
@@ -73,8 +76,56 @@ class MatchEngine {
             &MatchEngine::pull
         };
 
+
+        void printVec(const std::vector<MatchEngine::Order>& vec) {
+            for (const auto& order: vec)
+            {
+                std::cout << "Symbol: " << order.symbol << " Id: " << order.id << ", Price: " << order.price << ", Volume: " << order.volume << '\n';
+            }
+            
+        }
+
+        /*That function will get all leftover trade and pair them up based on the best matchup*/
+        void pairTrade() {
+            std::vector<std::string> symbols;
+
+            for (auto& book: _BOOK)
+            {
+                for (size_t i = 0; i < book.size(); i++)
+                {
+                    if (book[i].bookOrder != NONE && std::find(symbols.begin(), symbols.end(), book[i].symbol) == symbols.end()) {
+                        std::string symbol(book[i].symbol);
+                        
+                        auto& leftTrade = _leftTrades[symbol];
+
+                        leftTrade.emplace_back(book[i]);
+
+                        for (size_t j = i + 1; j < book.size(); j++)
+                        {
+                            if (book[j].symbol == symbol) {
+                                leftTrade.emplace_back(book[j]);
+                            }
+                        }
+                        
+                        symbols.emplace_back(book[i].symbol);
+                    }
+                }
+                
+                book.clear();
+                symbols.clear();
+            }
+            
+
+            for (auto& [symbol, order]: _leftTrades) {
+                std::cout << "========" << symbol << "=========" << '\n';
+                printVec(order);
+                std::cout << std::endl;
+            }
+
+        }
+
         /*Check For an Order based on a given Id, and pull it out from the book if present in one of them*/
-        void pull(const Order& orderToDelete) {
+        void pull(Order& orderToDelete) {
             for (auto& book: _BOOK) {
                 
                 auto it = std::find_if(book.begin(), book.end(), [&](auto& order) {
@@ -89,7 +140,7 @@ class MatchEngine {
         }
 
         /*Amend Order If Found in one of the two books*/
-        void amend(const Order& orderToUpdate) {
+        void amend(Order& orderToUpdate) {
             for (auto& book: _BOOK) {
                 
                 auto it = std::find_if(book.begin(), book.end(), [&](auto& order) {
@@ -119,18 +170,11 @@ class MatchEngine {
             }
         }
         
-        /*Function that will given a matched traded data, return back a formated string expected for the outputlist as such
-        <symbol>,<price>,<volume>,<aggressive_order_id>,<passive_order_id>*/
-        std::string registerTrade(const std::string& symbol, const double& price, const int& volume, const int& a_id, const int& p_id) {
-            std::ostringstream strs;
-            strs << price;
-            return symbol + "," + strs.str() + "," + std::to_string(volume) + "," + std::to_string(a_id) + "," + std::to_string(p_id);   
-        }
 
         /*This Method will handle the insert of new order in their respectives books*/
-        void insert(const Order& newOrder) {
+        void insert(Order& newOrder) {
                 int remainingVolume = newOrder.volume;
-                auto &myOrderBook = _BOOK[newOrder.bookOrder];
+                auto& myOrderBook = _BOOK[newOrder.bookOrder];
 
                 if (newOrder.bookOrder == MatchEngine::BOOK_ORDER::BUY) {
                     auto& book = _BOOK[MatchEngine::BOOK_ORDER::SELL];
@@ -173,8 +217,27 @@ class MatchEngine {
 
                 }
             }
+            newOrder.volume = remainingVolume;
             myOrderBook.emplace_back(newOrder);
         }
+
+        /*Function that will given leftover trades data, return back a formated string expected for the outputlist as such
+        <bid_price>,<bid_volume>,<ask_price>,<ask_volume>*/
+        std::string registerLeftTrade(const double& bid_price, const int& bid_volume, const double& ask_price, const int& ask_volume) {
+            std::ostringstream s_bid, s_ask;
+            s_bid << bid_price;
+            s_ask << ask_price;
+            return s_bid.str() + ',' + std::to_string(bid_volume) + ',' + s_ask.str() + ',' + std::to_string(ask_volume);
+        }
+
+        /*Function that will given a matched traded data, return back a formated string expected for the outputlist as such
+        <symbol>,<price>,<volume>,<aggressive_order_id>,<passive_order_id>*/
+        std::string registerTrade(const std::string& symbol, const double& price, const int& volume, const int& a_id, const int& p_id) {
+            std::ostringstream strs;
+            strs << price;
+            return symbol + "," + strs.str() + "," + std::to_string(volume) + "," + std::to_string(a_id) + "," + std::to_string(p_id);   
+        }
+
         
         /*Method that will check if the given input command has valid syntax, if so a vector holding all the relevant data will be returned, and if not nullopt will be returned*/
         std::optional<std::tuple<MatchEngine::COMMAND, MatchEngine::Order>> isValidInput(const std::string& command) {
@@ -236,9 +299,18 @@ std::ostream& operator<<(std::ostream& os, const std::vector<std::string>& vec)
 int main () {
     auto input = std::vector<std::string>();
 
-    input.emplace_back("INSERT,1,AAPL,BUY,12.2,5");
+    input.emplace_back("INSERT,1,WEBB,BUY,45.95,5");
+    input.emplace_back("INSERT,2,WEBB,BUY,45.95,6");
+    input.emplace_back("INSERT,3,WEBB,BUY,45.95,12");
+    input.emplace_back("INSERT,4,WEBB,SELL,46,8");
+    input.emplace_back("AMEND,2,46,3");
+    input.emplace_back("INSERT,5,WEBB,SELL,45.95,1");
+    input.emplace_back("AMEND,1,45.95,3");
+    input.emplace_back("INSERT,6,WEBB,SELL,45.95,1");
+    input.emplace_back("AMEND,1,45.95,5");
+    input.emplace_back("INSERT,7,WEBB,SELL,45.95,1");
 
     auto res = run(input);
-    
+    std::cout << '\n' << "END RESULT" << std::endl;
     std::cout << res;
 }
