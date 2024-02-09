@@ -68,7 +68,7 @@ class MatchEngine {
         /*Vector that will hold the end result*/
         std::vector<std::string> _finalOutput;
         /*Map that will hold by symbol all leftover trades*/
-        std::map<std::string, std::vector<MatchEngine::Order>> _leftTrades;
+        std::unordered_map<std::string, std::map<double, MatchEngine::Order>> _leftTrades;
         /*Array that will contain pointer to method: insert, amend and pull*/
         Command commands[3] = {
             &MatchEngine::insert,
@@ -77,8 +77,8 @@ class MatchEngine {
         };
 
 
-        void printVec(const std::vector<MatchEngine::Order>& vec) {
-            for (const auto& order: vec)
+        void printVec(const std::map<double, MatchEngine::Order>& vec) {
+            for (const auto& [d, order]: vec)
             {
                 std::cout << "Symbol: " << order.symbol << " Id: " << order.id << ", Price: " << order.price << ", Volume: " << order.volume << '\n';
             }
@@ -87,39 +87,37 @@ class MatchEngine {
 
         /*That function will get all leftover trade and pair them up based on the best matchup*/
         void pairTrade() {
-            std::vector<std::string> symbols;
 
             for (auto& book: _BOOK)
             {
                 for (size_t i = 0; i < book.size(); i++)
-                {
-                    if (book[i].bookOrder != NONE && std::find(symbols.begin(), symbols.end(), book[i].symbol) == symbols.end()) {
-                        std::string symbol(book[i].symbol);
-                        
-                        auto& leftTrade = _leftTrades[symbol];
-
-                        leftTrade.emplace_back(book[i]);
-
-                        for (size_t j = i + 1; j < book.size(); j++)
-                        {
-                            if (book[j].symbol == symbol) {
-                                leftTrade.emplace_back(book[j]);
-                            }
-                        }
-                        
-                        symbols.emplace_back(book[i].symbol);
+                { 
+                    auto& leftTrade = _leftTrades[book[i].symbol];
+                    auto it = leftTrade.find(book[i].price);
+                    if (it == leftTrade.end()) {
+                        leftTrade[book[i].price] = book[i];
+                        continue;
                     }
+                    it -> second.volume += book[i].volume;
                 }
                 
                 book.clear();
-                symbols.clear();
             }
             
 
-            for (auto& [symbol, order]: _leftTrades) {
-                std::cout << "========" << symbol << "=========" << '\n';
-                printVec(order);
-                std::cout << std::endl;
+            for (const auto& [symbol, orders]: _leftTrades) {
+                
+                this -> _finalOutput.emplace_back("===" + symbol + "===");
+                
+                auto it = orders.begin();
+
+                std::vector<int> vec(orders.size());
+
+                for (; it != orders.end(); it++)
+                {
+
+                }
+
             }
 
         }
@@ -299,6 +297,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<std::string>& vec)
 int main () {
     auto input = std::vector<std::string>();
 
+    
     input.emplace_back("INSERT,1,WEBB,BUY,45.95,5");
     input.emplace_back("INSERT,2,WEBB,BUY,45.95,6");
     input.emplace_back("INSERT,3,WEBB,BUY,45.95,12");
@@ -309,8 +308,6 @@ int main () {
     input.emplace_back("INSERT,6,WEBB,SELL,45.95,1");
     input.emplace_back("AMEND,1,45.95,5");
     input.emplace_back("INSERT,7,WEBB,SELL,45.95,1");
-
     auto res = run(input);
-    std::cout << '\n' << "END RESULT" << std::endl;
     std::cout << res;
 }
