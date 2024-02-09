@@ -5,6 +5,7 @@
 #include <sstream>
 #include <tuple>
 #include <algorithm>
+#include <set>
 #include <iostream>
 
 class MatchEngine {
@@ -35,7 +36,7 @@ class MatchEngine {
             return this -> _finalOutput;
         };
     
-        enum BOOK_ORDER {
+        enum SIDE {
             BUY,
             SELL,
             NONE
@@ -47,16 +48,22 @@ class MatchEngine {
             PULL,
         };
         
+
+
+        static const char BUY_STR[];
+        static const char INSERT_STR[];
+        static const char AMEND_STR[];
+
+
+    private:
         struct Order {
-            int id;
-            enum MatchEngine::BOOK_ORDER bookOrder = MatchEngine::BOOK_ORDER::NONE;
+            int id = -1;
+            enum MatchEngine::SIDE side = MatchEngine::SIDE::NONE;
             int volume = INT32_MAX;
-            std::string symbol;
+            std::string symbol = "";
             double price = 0;
 
         };
-    
-    private:
 
         /*Define Pointer to method*/
         typedef void (MatchEngine::*Command)(Order&);
@@ -68,7 +75,7 @@ class MatchEngine {
         /*Vector that will hold the end result*/
         std::vector<std::string> _finalOutput;
         /*Map that will hold by symbol all leftover trades*/
-        std::unordered_map<std::string, std::map<double, MatchEngine::Order>> _leftTrades;
+        std::map<std::string, std::unordered_map<size_t, std::map<double, MatchEngine::Order>>> _leftTrades;
         /*Array that will contain pointer to method: insert, amend and pull*/
         Command commands[3] = {
             &MatchEngine::insert,
@@ -77,47 +84,54 @@ class MatchEngine {
         };
 
 
-        void printVec(const std::map<double, MatchEngine::Order>& vec) {
-            for (const auto& [d, order]: vec)
-            {
-                std::cout << "Symbol: " << order.symbol << " Id: " << order.id << ", Price: " << order.price << ", Volume: " << order.volume << '\n';
-            }
-            
-        }
-
         /*That function will get all leftover trade and pair them up based on the best matchup*/
         void pairTrade() {
 
-            for (auto& book: _BOOK)
+            for (size_t i = 0; i < _BOOK.size(); i++)
             {
-                for (size_t i = 0; i < book.size(); i++)
-                { 
-                    auto& leftTrade = _leftTrades[book[i].symbol];
-                    auto it = leftTrade.find(book[i].price);
-                    if (it == leftTrade.end()) {
-                        leftTrade[book[i].price] = book[i];
+                auto& book = _BOOK[i];
+
+                for (size_t j = 0; j < book.size(); j++)
+                {
+                    auto& map = _leftTrades[book[j].symbol][i]; 
+                    auto it = map.find(book[j].price);
+                    
+                    if (it == map.end()) {
+                        map[book[j].price] = book[j];
                         continue;
                     }
-                    it -> second.volume += book[i].volume;
+
+                    it -> second.volume += book[j].volume;
                 }
-                
-                book.clear();
+
             }
             
 
-            for (const auto& [symbol, orders]: _leftTrades) {
+            for (auto& [symbol, book]: _leftTrades) {
                 
                 this -> _finalOutput.emplace_back("===" + symbol + "===");
+                auto& buyBook = book[MatchEngine::SIDE::BUY];
+                auto& sellBook = book[MatchEngine::SIDE::SELL];
                 
-                auto it = orders.begin();
+                auto sellIt = sellBook.begin();
 
-                std::vector<int> vec(orders.size());
+                for (auto buyIt = buyBook.rbegin(); buyIt != buyBook.rend(); ++buyIt) {
 
-                for (; it != orders.end(); it++)
-                {
+                    if (sellIt != sellBook.end()) {
+                        this -> _finalOutput
+                        .emplace_back(registerLeftTrade(buyIt->second.price, buyIt->second.volume, sellIt->second.price, sellIt->second.volume));
+                        sellIt++;
+                        continue;
+                    }
 
+                    this -> _finalOutput.emplace_back(registerLeftTrade(buyIt -> second.price, buyIt -> second.volume, MatchEngine::SIDE::BUY));
                 }
 
+                for (; sellIt  != sellBook.end(); sellIt++)
+                {
+                    this -> _finalOutput.emplace_back(registerLeftTrade(sellIt -> second.price, sellIt -> second.volume, MatchEngine::SIDE::SELL));
+                }
+                              
             }
 
         }
@@ -172,10 +186,9 @@ class MatchEngine {
         /*This Method will handle the insert of new order in their respectives books*/
         void insert(Order& newOrder) {
                 int remainingVolume = newOrder.volume;
-                auto& myOrderBook = _BOOK[newOrder.bookOrder];
-
-                if (newOrder.bookOrder == MatchEngine::BOOK_ORDER::BUY) {
-                    auto& book = _BOOK[MatchEngine::BOOK_ORDER::SELL];
+                auto& myOrderBook = _BOOK[newOrder.side];
+                if (newOrder.side == MatchEngine::SIDE::BUY) {
+                    auto& book = _BOOK[MatchEngine::SIDE::SELL];
                     for (size_t i = 0; i < book.size(); i++) {
                         
                         if (book[i].symbol == newOrder.symbol && book[i].price <= newOrder.price) {
@@ -195,7 +208,7 @@ class MatchEngine {
                     }
                 }
                 else {
-                    auto& book = _BOOK[MatchEngine::BOOK_ORDER::BUY];
+                    auto& book = _BOOK[MatchEngine::SIDE::BUY];
 
                     for (size_t i = 0; i < book.size(); i++) {
 
@@ -228,6 +241,15 @@ class MatchEngine {
             return s_bid.str() + ',' + std::to_string(bid_volume) + ',' + s_ask.str() + ',' + std::to_string(ask_volume);
         }
 
+        std::string registerLeftTrade(const double& price, const int& volume, MatchEngine::SIDE side) {
+            std::ostringstream ss;
+            ss << price;
+            
+            if (side == MatchEngine::SIDE::BUY) return ss.str() + ',' + std::to_string(volume) + ",,";
+            
+            return ",," + ss.str() + ',' + std::to_string(volume);
+        }
+
         /*Function that will given a matched traded data, return back a formated string expected for the outputlist as such
         <symbol>,<price>,<volume>,<aggressive_order_id>,<passive_order_id>*/
         std::string registerTrade(const std::string& symbol, const double& price, const int& volume, const int& a_id, const int& p_id) {
@@ -253,14 +275,14 @@ class MatchEngine {
             
             order.id = std::stoi(vec[1]);
             
-            if (vec[0] == "INSERT") {
+            if (vec[0] == MatchEngine::INSERT_STR) {
                 action = MatchEngine::COMMAND::INSERT;
                 order.symbol = vec[2];
-                order.bookOrder = vec[3] == "BUY" ? MatchEngine::BOOK_ORDER::BUY : MatchEngine::BOOK_ORDER::SELL;
+                order.side = vec[3] == BUY_STR ? MatchEngine::SIDE::BUY : MatchEngine::SIDE::SELL;
                 order.price = std::stod(vec[4]);
                 order.volume = std::stoi(vec[5]);
             }
-            else if (vec[0] == "AMEND") {
+            else if (vec[0] == MatchEngine::AMEND_STR) {
                 action = MatchEngine::COMMAND::AMEND;
                 order.price = std::stod(vec[2]);
                 order.volume = std::stoi(vec[3]);
@@ -280,6 +302,10 @@ class MatchEngine {
         }
 };
 
+const char MatchEngine::BUY_STR[] = "BUY";
+const char MatchEngine::INSERT_STR[] = "INSERT";
+const char MatchEngine::AMEND_STR[] = "AMEND";
+
 std::vector<std::string> run(std::vector<std::string> const& input) {
     MatchEngine matchingEngine(input);
     
@@ -297,17 +323,7 @@ std::ostream& operator<<(std::ostream& os, const std::vector<std::string>& vec)
 int main () {
     auto input = std::vector<std::string>();
 
-    
-    input.emplace_back("INSERT,1,WEBB,BUY,45.95,5");
-    input.emplace_back("INSERT,2,WEBB,BUY,45.95,6");
-    input.emplace_back("INSERT,3,WEBB,BUY,45.95,12");
-    input.emplace_back("INSERT,4,WEBB,SELL,46,8");
-    input.emplace_back("AMEND,2,46,3");
-    input.emplace_back("INSERT,5,WEBB,SELL,45.95,1");
-    input.emplace_back("AMEND,1,45.95,3");
-    input.emplace_back("INSERT,6,WEBB,SELL,45.95,1");
-    input.emplace_back("AMEND,1,45.95,5");
-    input.emplace_back("INSERT,7,WEBB,SELL,45.95,1");
+input.emplace_back("INSERT,1,AAPL,BUY,12.2,5");
     auto res = run(input);
     std::cout << res;
 }
