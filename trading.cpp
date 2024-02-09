@@ -1,11 +1,10 @@
 #include <vector>
-# include <map>
+#include <map>
 #include <string>
 #include <optional>
 #include <sstream>
 #include <tuple>
 #include <algorithm>
-#include <set>
 #include <iostream>
 
 class MatchEngine {
@@ -185,49 +184,32 @@ class MatchEngine {
 
         /*This Method will handle the insert of new order in their respectives books*/
         void insert(Order& newOrder) {
-                int remainingVolume = newOrder.volume;
-                auto& myOrderBook = _BOOK[newOrder.side];
-                if (newOrder.side == MatchEngine::SIDE::BUY) {
-                    auto& book = _BOOK[MatchEngine::SIDE::SELL];
-                    for (size_t i = 0; i < book.size(); i++) {
+
+            int side = newOrder.side;
+            int remainingVolume = newOrder.volume;
+            auto& myOrderBook = _BOOK[newOrder.side];
+            auto& book = _BOOK[side == MatchEngine::SIDE::BUY ? MatchEngine::SIDE::SELL : MatchEngine::SIDE::BUY];
+
+            for (size_t i = 0; i < book.size(); i++) {
+                    
+                if (book[i].symbol == newOrder.symbol
+                    && ((side == MatchEngine::SIDE::BUY && book[i].price <= newOrder.price)
+                    || (side == MatchEngine::SIDE::SELL && book[i].price >= newOrder.price))) {
+
+                    int tradedVolume = remainingVolume >= book[i].volume ? book[i].volume : remainingVolume;
+                    remainingVolume -= book[i].volume;
+                    book[i].volume -= tradedVolume;
+                    _finalOutput.emplace_back(this -> registerTrade(book[i].symbol, book[i].price, tradedVolume, newOrder.id, book[i].id));
                         
-                        if (book[i].symbol == newOrder.symbol && book[i].price <= newOrder.price) {
-
-                            int tradedVolume = remainingVolume >= book[i].volume ? book[i].volume : remainingVolume;
-                            remainingVolume -= book[i].volume;
-                            book[i].volume -= tradedVolume;
-                            _finalOutput.emplace_back(this -> registerTrade(book[i].symbol, book[i].price, tradedVolume, newOrder.id, book[i].id));
-                                
-                            if (book[i].volume == 0) {
-                                book.erase(book.begin() + i);
-                                --i;
-                            }
-                                    
-                            if (remainingVolume <= 0) return ;
-                        }
+                    if (book[i].volume == 0) {
+                        book.erase(book.begin() + i);
+                        --i;
                     }
-                }
-                else {
-                    auto& book = _BOOK[MatchEngine::SIDE::BUY];
-
-                    for (size_t i = 0; i < book.size(); i++) {
-
-                        if (book[i].symbol == newOrder.symbol && book[i].price >= newOrder.price) {
-                            int tradedVolume = remainingVolume >= book[i].volume ? book[i].volume : remainingVolume;
-                            remainingVolume -= book[i].volume;
-                            book[i].volume -= tradedVolume;
-                            _finalOutput.emplace_back(this -> registerTrade(book[i].symbol, book[i].price, tradedVolume, newOrder.id, book[i].id));
                             
-                            if (book[i].volume == 0) {
-                                book.erase(book.begin() + i);
-                                --i;
-                            }
-
-                            if (remainingVolume <= 0) return ;
-                        }
-
+                    if (remainingVolume <= 0) return ;
                 }
             }
+                
             newOrder.volume = remainingVolume;
             myOrderBook.emplace_back(newOrder);
         }
